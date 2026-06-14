@@ -1,19 +1,14 @@
 {
   "name": "cge-verifier",
   "version": "0.1.0",
-  "description": "Módulo AuditaCGE - Verificación de boletas CGE para el CMS",
   "type": "module",
-  "main": "worker/index.js",
   "scripts": {
     "dev":    "wrangler dev worker/index.js",
-    "deploy": "wrangler deploy worker/index.js",
-    "test":   "node parser/index.js",
-    "parse":  "node parser/index.js"
+    "deploy": "wrangler deploy worker/index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.47.3",
-    "hono": "^4.7.4",
-    "pdf-parse": "1.1.1"
+    "hono": "^4.7.4"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

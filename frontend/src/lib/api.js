@@ -16,17 +16,15 @@ async function req(path, options = {}, token) {
 }
 
 /**
- * Crea el análisis Y procesa los PDFs en una sola llamada.
- * Los PDFs se envían como multipart/form-data, se parsean en el Worker
- * en memoria y se descartan. Solo los datos quedan en Supabase.
+ * Envía los datos ya parseados al Worker (JSON, no PDFs).
+ * El parsing ocurre en el browser con pdfjs-dist.
  */
-export async function createAndProcess(files, meterReading, token) {
-  const form = new FormData()
-  form.append('meter_reading', String(meterReading))
-  for (const file of files) {
-    form.append('bills', file)
-  }
-  return req('/api/analyses', { method: 'POST', body: form }, token)
+export function createAndProcess(parsedBills, meterReading, token) {
+  return req('/api/analyses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ meter_reading: meterReading, bills: parsedBills }),
+  }, token)
 }
 
 export function getPreview(analysisId, token) {
