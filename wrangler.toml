@@ -3,12 +3,8 @@ main = "worker/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Assets del frontend (build de Vite)
-[assets]
-directory = "./public"
-
 [vars]
-SITE_URL = "https://cge-verifier.angulodev.workers.dev"
+SITE_URL = "https://angulodev.github.io/cge-verifier"
 
 # Secrets — wrangler secret put NOMBRE
 # SUPABASE_URL
