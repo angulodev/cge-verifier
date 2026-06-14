@@ -3,7 +3,6 @@ import { cors } from 'hono/cors'
 import { createClient } from '@supabase/supabase-js'
 
 const app = new Hono()
-
 app.use('*', cors({ origin: '*' }))
 
 app.use('*', async (c, next) => {
@@ -16,70 +15,63 @@ app.use('*', async (c, next) => {
   await next()
 })
 
-app.get('/health', c => c.json({ ok: true, module: 'cge-verifier' }))
+app.get('/health', c => c.json({ ok: true }))
 
 // ── POST /api/analyses ─────────────────────────────────────────────────────
-// Recibe datos ya parseados desde el browser (no PDFs)
 app.post('/api/analyses', async c => {
   const supabase = c.get('supabase')
   const { meter_reading, bills: parsedBills } = await c.req.json()
 
-  if (!meter_reading || !parsedBills?.length) {
+  if (!meter_reading || !parsedBills?.length)
     return c.json({ error: 'meter_reading y bills son requeridos' }, 400)
-  }
+
+  // Obtener usuario autenticado
+  const { data: { user }, error: uErr } = await supabase.auth.getUser()
+  if (uErr || !user) return c.json({ error: 'No autenticado' }, 401)
 
   // 1. Crear análisis
   const { data: analysis, error: aErr } = await supabase
     .from('cge_analyses')
-    .insert({ meter_reading, status: 'processing' })
+    .insert({ meter_reading, status: 'processing', user_id: user.id })
     .select().single()
 
   if (aErr) return c.json({ error: aErr.message }, 500)
 
   const findings = []
 
-  // 2. Guardar boletas en Supabase
+  // 2. Guardar boletas
   for (const b of parsedBills.filter(b => b.success)) {
     const { data: bill } = await supabase.from('cge_bills').insert({
-      analysis_id:          analysis.id,
-      bill_number:          b.billNumber,
-      client_number:        b.clientNumber,
-      client_address:       b.clientAddress,
-      emission_date:        b.emissionDate,
-      period_month:         b.periodMonth,
-      period_year:          b.periodYear,
-      kwh_consumed:         b.kwhConsumed,
-      total_boleta:         b.totalBoleta,
-      total_ajustes:        b.totalAjustes,
-      total_amount:         b.totalAmount,
-      price_per_kwh:        b.pricePerKwh,
-      charges:              b.charges,
-      file_name:            b.fileName,
+      analysis_id: analysis.id, bill_number: b.billNumber,
+      client_number: b.clientNumber, client_address: b.clientAddress,
+      emission_date: b.emissionDate, period_month: b.periodMonth,
+      period_year: b.periodYear, kwh_consumed: b.kwhConsumed,
+      total_boleta: b.totalBoleta, total_ajustes: b.totalAjustes,
+      total_amount: b.totalAmount, price_per_kwh: b.pricePerKwh,
+      charges: b.charges, file_name: b.fileName,
       has_arithmetic_issue: b.hasArithmeticIssue,
     }).select().single()
 
-    if (b.hasArithmeticIssue) {
-      findings.push({
-        analysis_id: analysis.id, bill_id: bill?.id,
-        type: 'billing_arithmetic', severity: 'critical',
-        description: `Boleta ${b.billNumber}: los cargos no cuadran con el total`,
-        is_preview: false,
-      })
-    }
+    if (b.hasArithmeticIssue) findings.push({
+      analysis_id: analysis.id, bill_id: bill?.id,
+      type: 'billing_arithmetic', severity: 'critical',
+      description: `Boleta ${b.billNumber}: los cargos no cuadran con el total`,
+      is_preview: false,
+    })
   }
 
-  // 3. Calcular cuadratura
-  const sorted = parsedBills
-    .filter(b => b.success)
+  // 3. Cuadratura
+  const sorted = parsedBills.filter(b => b.success)
     .sort((a, b) => a.periodYear !== b.periodYear ? a.periodYear - b.periodYear : a.periodMonth - b.periodMonth)
 
-  const totalKwh   = sorted.reduce((s, b) => s + b.kwhConsumed, 0)
-  const diffKwh    = meter_reading - totalKwh
-  const avgPrice   = sorted.filter(b => b.pricePerKwh).reduce((s, b, _, arr) => s + b.pricePerKwh / arr.length, 0)
-  const diffCLP    = Math.round(Math.abs(diffKwh) * avgPrice)
-  const status     = Math.abs(diffKwh) <= 2 ? 'ok' : diffKwh < 0 ? 'overbilled' : 'underbilled'
+  const totalKwh = sorted.reduce((s, b) => s + b.kwhConsumed, 0)
+  const diffKwh  = meter_reading - totalKwh
+  const prices   = sorted.filter(b => b.pricePerKwh)
+  const avgPrice = prices.length ? prices.reduce((s, b) => s + b.pricePerKwh, 0) / prices.length : 0
+  const diffCLP  = Math.round(Math.abs(diffKwh) * avgPrice)
+  const status   = Math.abs(diffKwh) <= 2 ? 'ok' : diffKwh < 0 ? 'overbilled' : 'underbilled'
 
-  // 4. Detectar meses faltantes
+  // 4. Meses faltantes
   const missing = []
   for (let i = 0; i < sorted.length - 1; i++) {
     let em = sorted[i].periodMonth + 1, ey = sorted[i].periodYear
@@ -93,41 +85,33 @@ app.post('/api/analyses', async c => {
     }
   }
 
-  // 5. Detectar picos
+  // 5. Picos de consumo
   const vals   = sorted.map(b => b.kwhConsumed)
   const mean   = vals.reduce((a, b) => a + b, 0) / vals.length
   const stdDev = Math.sqrt(vals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / vals.length)
   for (const b of sorted) {
-    if (b.kwhConsumed > mean + 1.5 * stdDev) {
-      findings.push({
-        analysis_id: analysis.id,
-        type: 'consumption_spike', severity: 'warning',
-        description: `${String(b.periodMonth).padStart(2,'0')}/${b.periodYear}: consumo ${Math.round(((b.kwhConsumed - mean) / mean) * 100)}% sobre el promedio`,
-        amount_affected: Math.round((b.kwhConsumed - mean) * avgPrice),
-        is_preview: false,
-        metadata: { kwhConsumed: b.kwhConsumed, avgKwh: Math.round(mean) },
-      })
-    }
-  }
-
-  if (status !== 'ok') {
-    findings.push({
-      analysis_id: analysis.id, type: 'meter_mismatch', severity: 'critical',
-      description: status === 'overbilled'
-        ? `Te cobraron ${Math.abs(Math.round(diffKwh))} kWh de más (~$${diffCLP.toLocaleString('es-CL')} CLP)`
-        : `Hay ${Math.round(diffKwh)} kWh consumidos sin facturar`,
-      amount_affected: diffCLP, is_preview: true,
-      metadata: { diffKwh: Math.round(diffKwh), status },
+    if (b.kwhConsumed > mean + 1.5 * stdDev) findings.push({
+      analysis_id: analysis.id, type: 'consumption_spike', severity: 'warning',
+      description: `${String(b.periodMonth).padStart(2,'0')}/${b.periodYear}: consumo ${Math.round(((b.kwhConsumed - mean) / mean) * 100)}% sobre el promedio`,
+      amount_affected: Math.round((b.kwhConsumed - mean) * avgPrice),
+      is_preview: false, metadata: { kwhConsumed: b.kwhConsumed, avgKwh: Math.round(mean) },
     })
   }
 
-  if (missing.length) {
-    findings.push({
-      analysis_id: analysis.id, type: 'missing_months', severity: 'info',
-      description: `Faltan ${missing.length} boleta(s): ${missing.map(m => m.label).join(', ')}`,
-      is_preview: true, metadata: { missingMonths: missing },
-    })
-  }
+  if (status !== 'ok') findings.push({
+    analysis_id: analysis.id, type: 'meter_mismatch', severity: 'critical',
+    description: status === 'overbilled'
+      ? `Te cobraron ${Math.abs(Math.round(diffKwh))} kWh de más (~$${diffCLP.toLocaleString('es-CL')} CLP)`
+      : `Hay ${Math.round(diffKwh)} kWh consumidos sin facturar`,
+    amount_affected: diffCLP, is_preview: true,
+    metadata: { diffKwh: Math.round(diffKwh), status },
+  })
+
+  if (missing.length) findings.push({
+    analysis_id: analysis.id, type: 'missing_months', severity: 'info',
+    description: `Faltan ${missing.length} boleta(s): ${missing.map(m => m.label).join(', ')}`,
+    is_preview: true, metadata: { missingMonths: missing },
+  })
 
   if (findings.length) await supabase.from('cge_findings').insert(findings)
 
@@ -147,7 +131,7 @@ app.post('/api/analyses', async c => {
       differenceCLP: diffCLP, meterStatus: status,
       findingsCount: findings.length, missingMonths: missing.length,
       periodStart: sorted[0] ? `${sorted[0].periodMonth}/${sorted[0].periodYear}` : null,
-      periodEnd:   sorted.at(-1) ? `${sorted.at(-1).periodMonth}/${sorted.at(-1).periodYear}` : null,
+      periodEnd: sorted.at(-1) ? `${sorted.at(-1).periodMonth}/${sorted.at(-1).periodYear}` : null,
     }
   })
 })
@@ -181,7 +165,7 @@ app.get('/api/analyses/:id/detail', async c => {
     supabase.from('cge_findings').select('*').eq('analysis_id', analysis.id),
   ])
   const kwhs = bills?.map(b => b.kwh_consumed) ?? []
-  const avg  = kwhs.length ? Math.round(kwhs.reduce((a,b)=>a+b,0)/kwhs.length) : 0
+  const avg  = kwhs.length ? Math.round(kwhs.reduce((a, b) => a + b, 0) / kwhs.length) : 0
   return c.json({
     analysis, findings,
     bills: bills?.map(b => ({
@@ -192,8 +176,8 @@ app.get('/api/analyses/:id/detail', async c => {
       hasArithmeticIssue: b.has_arithmetic_issue,
     })),
     avgMonthlyKwh: avg,
-    maxKwhMonth: bills?.reduce((m,b) => b.kwh_consumed > (m?.kwh_consumed??0)?b:m, null),
-    minKwhMonth: bills?.reduce((m,b) => b.kwh_consumed < (m?.kwh_consumed??Infinity)?b:m, null),
+    maxKwhMonth: bills?.reduce((m, b) => b.kwh_consumed > (m?.kwh_consumed ?? 0) ? b : m, null),
+    minKwhMonth: bills?.reduce((m, b) => b.kwh_consumed < (m?.kwh_consumed ?? Infinity) ? b : m, null),
   })
 })
 
@@ -201,6 +185,9 @@ app.get('/api/analyses/:id/detail', async c => {
 app.post('/api/analyses/:id/pay', async c => {
   const supabase = c.get('supabase')
   const id = c.req.param('id')
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return c.json({ error: 'No autenticado' }, 401)
+
   const mpRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${c.env.MP_ACCESS_TOKEN}` },
@@ -214,7 +201,7 @@ app.post('/api/analyses/:id/pay', async c => {
   })
   const mp = await mpRes.json()
   if (!mp.id) return c.json({ error: 'Error MP' }, 500)
-  await supabase.from('cge_payments').insert({ analysis_id: id, provider_order_id: mp.id, amount: 2990 })
+  await supabase.from('cge_payments').insert({ analysis_id: id, provider_order_id: mp.id, amount: 2990, user_id: user.id })
   return c.json({ preferenceId: mp.id, initPoint: mp.init_point })
 })
 
@@ -223,7 +210,9 @@ app.post('/api/webhooks/mp', async c => {
   const supabase = c.get('supabase')
   const body = await c.req.json()
   if (body.type !== 'payment') return c.json({ ok: true })
-  const pay = await (await fetch(`https://api.mercadopago.com/v1/payments/${body.data.id}`, { headers: { 'Authorization': `Bearer ${c.env.MP_ACCESS_TOKEN}` } })).json()
+  const pay = await (await fetch(`https://api.mercadopago.com/v1/payments/${body.data.id}`, {
+    headers: { 'Authorization': `Bearer ${c.env.MP_ACCESS_TOKEN}` },
+  })).json()
   if (pay.status !== 'approved') return c.json({ ok: true })
   const aid = pay.metadata?.analysis_id
   if (!aid) return c.json({ ok: true })
