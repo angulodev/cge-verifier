@@ -149,7 +149,7 @@ app.get('/api/analyses/:id/preview', async c => {
       differenceCLP: data.difference_clp, meterStatus: data.meter_status,
       findingsCount: findings?.length ?? 0,
       missingMonths: findings?.find(f => f.type === 'missing_months')?.metadata?.missingMonths?.length ?? 0,
-      periodStart: data.period_start, periodEnd: data.period_end,
+      periodStart: data.period_start, periodEnd: data.period_end, status: data.status,
     }
   })
 })

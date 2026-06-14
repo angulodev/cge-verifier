@@ -126,7 +126,7 @@ export default function App() {
       {screen === 'upload'         && <Upload     onNext={handleUploadNext} />}
       {screen === 'meter'          && <Meter      onNext={handleMeterNext} />}
       {screen === 'processing'     && <Processing files={files} meterReading={meterReading} token={token} onDone={handleProcessingDone} onError={msg => { setError(msg); setScreen('error') }} />}
-      {screen === 'preview'        && preview && <Preview preview={preview} analysisId={analysisId} token={token} onBack={() => setScreen('upload')} />}
+      {screen === 'preview'        && preview && <Preview preview={preview} analysisId={analysisId} token={token} onPaid={r => { setReport(r); setScreen('report') }} onBack={() => setScreen('upload')} />}
       {screen === 'loading_report' && <Loader text="Cargando reporte..." />}
       {screen === 'report'         && report && preview && <Report report={report} preview={preview} analysisId={analysisId} onHome={reset} />}
       {screen === 'error'          && <ErrorScreen message={error} onRetry={reset} />}
