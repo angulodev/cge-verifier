@@ -14,18 +14,23 @@ export default function Preview({ preview, analysisId, token, onPaid, onBack }) 
     setLoading(true)
     setError(null)
     try {
-      if (isPaid) {
-        // Ya pagado → ir directo al reporte
-        const report = await getReport(analysisId, token)
-        onPaid(report)
-      } else {
-        // Iniciar pago con Mercado Pago
-        const { initPoint } = await startPayment(analysisId, token)
-        window.location.href = initPoint
-      }
+      // Siempre intenta el reporte primero — si ya está pagado entra directo
+      const report = await getReport(analysisId, token)
+      onPaid(report)
     } catch (e) {
-      setError(isPaid ? 'No se pudo cargar el reporte.' : 'No se pudo iniciar el pago. Intenta de nuevo.')
-      setLoading(false)
+      if (e.message?.includes('Pago requerido') || e.message?.includes('PAYMENT_REQUIRED') || e.message?.includes('402')) {
+        // No está pagado → ir a Mercado Pago
+        try {
+          const { initPoint } = await startPayment(analysisId, token)
+          window.location.href = initPoint
+        } catch (e2) {
+          setError('No se pudo iniciar el pago. Intenta de nuevo.')
+          setLoading(false)
+        }
+      } else {
+        setError('No se pudo cargar el reporte.')
+        setLoading(false)
+      }
     }
   }
 

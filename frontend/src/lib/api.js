@@ -10,7 +10,8 @@ async function req(path, options = {}, token) {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err.error ?? `HTTP ${res.status}`)
+    const msg = err.code ?? err.error ?? `HTTP ${res.status}`
+    throw new Error(msg)
   }
   return res.json()
 }
