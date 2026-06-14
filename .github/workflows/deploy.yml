@@ -3,16 +3,18 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   # ── Job 1: Frontend → GitHub Pages ────────────────────────────────────────
   frontend:
     name: Build & Deploy Frontend
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -24,7 +26,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: frontend/package.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install deps
         working-directory: frontend
@@ -50,10 +52,12 @@ jobs:
         id: deploy
         uses: actions/deploy-pages@v4
 
-  # ── Job 2: Worker → Cloudflare ────────────────────────────────────────────
+  # ── Job 2: Worker API → Cloudflare ────────────────────────────────────────
   worker:
     name: Deploy Worker API
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +66,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: package.json
+          cache-dependency-path: package-lock.json
 
       - name: Install deps
         run: npm ci
@@ -70,8 +74,8 @@ jobs:
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken:   ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId:  ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Set Worker secrets
         env:
