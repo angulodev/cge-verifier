@@ -6,8 +6,5 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 SITE_URL = "https://angulodev.github.io/cge-verifier"
 
-# Secrets — wrangler secret put NOMBRE
-# SUPABASE_URL
-# SUPABASE_ANON_KEY
-# MP_ACCESS_TOKEN
-# WORKER_URL
+# Secrets — configurados via wrangler secret put
+# SUPABASE_URL, SUPABASE_ANON_KEY, MP_ACCESS_TOKEN, WORKER_URL
