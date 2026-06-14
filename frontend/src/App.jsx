@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { supabase, getToken, logout } from './lib/supabase'
-import { createAnalysis, getPreview, getReport } from './lib/api'
+import { supabase, logout } from './lib/supabase'
+import { getPreview, getReport } from './lib/api'
 import { C } from './components/ui'
 
 import Landing    from './screens/Landing'
@@ -24,34 +24,53 @@ function ErrorScreen({ message, onRetry }) {
   )
 }
 
-export default function App() {
-  const [screen,        setScreen]       = useState('landing')
-  const [user,          setUser]         = useState(null)
-  const [token,         setToken]        = useState(null)
-  const [analysisId,    setAnalysisId]   = useState(null)
-  const [uploadedBills, setUploadedBills]= useState([])
-  const [preview,       setPreview]      = useState(null)
-  const [report,        setReport]       = useState(null)
-  const [error,         setError]        = useState(null)
+function Loader({ text = 'Cargando...' }) {
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 36, marginBottom: 16 }}>⚡</div>
+        <div style={{ color: C.muted, fontSize: 14 }}>{text}</div>
+      </div>
+    </div>
+  )
+}
 
+export default function App() {
+  const [screen,       setScreen]      = useState('landing')
+  const [user,         setUser]        = useState(null)
+  const [token,        setToken]       = useState(null)
+  const [files,        setFiles]       = useState([])
+  const [meterReading, setMeterReading]= useState(null)
+  const [analysisId,   setAnalysisId]  = useState(null)
+  const [preview,      setPreview]     = useState(null)
+  const [report,       setReport]      = useState(null)
+  const [error,        setError]       = useState(null)
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data?.session) { setUser(data.session.user); setToken(data.session.access_token) }
     })
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       if (session) {
         setUser(session.user); setToken(session.access_token)
-        if (['landing','login'].includes(screen)) setScreen('upload')
+        if (['landing', 'login'].includes(screen)) setScreen('upload')
       } else { setUser(null); setToken(null) }
     })
+
+    // Retorno desde Mercado Pago
     const params = new URLSearchParams(window.location.search)
     if (params.get('pago') === 'ok') {
-      const aid = params.get('analysis_id') ?? localStorage.getItem('cge_analysis_id')
-      if (aid) { setAnalysisId(aid); setScreen('loading_report'); window.history.replaceState({}, '', '/') }
+      const aid = params.get('analysis_id') ?? localStorage.getItem('cge_last_analysis')
+      if (aid) { setAnalysisId(aid); setScreen('loading_report') }
+      window.history.replaceState({}, '', '/')
     }
+
     return () => subscription.unsubscribe()
   }, [])
 
+  // ── Cargar reporte tras pago ──────────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'loading_report' || !analysisId || !token) return
     ;(async () => {
@@ -63,31 +82,35 @@ export default function App() {
   }, [screen, analysisId, token])
 
   const reset = () => {
-    setScreen('landing'); setAnalysisId(null); setUploadedBills([])
-    setPreview(null); setReport(null); setError(null)
-    localStorage.removeItem('cge_analysis_id')
+    setScreen('landing'); setFiles([]); setMeterReading(null)
+    setAnalysisId(null); setPreview(null); setReport(null); setError(null)
+    localStorage.removeItem('cge_last_analysis')
   }
 
-  const handleMeterDone = async (meterReading) => {
-    try {
-      const { analysis } = await createAnalysis(meterReading, token)
-      setAnalysisId(analysis.id)
-      localStorage.setItem('cge_analysis_id', analysis.id)
-      setScreen('processing')
-    } catch (e) { setError(e.message); setScreen('error') }
+  // ── Handlers de flujo ─────────────────────────────────────────────────────
+  const handleUploadNext = (selectedFiles) => {
+    setFiles(selectedFiles)
+    setScreen('meter')
   }
 
-  const handleProcessingDone = async () => {
-    try {
-      const { preview: p } = await getPreview(analysisId, token)
-      setPreview(p); setScreen('preview')
-    } catch (e) { setError(e.message); setScreen('error') }
+  const handleMeterNext = (reading) => {
+    setMeterReading(reading)
+    setScreen('processing')
+  }
+
+  const handleProcessingDone = (result) => {
+    // result contiene { analysisId, preview }
+    setAnalysisId(result.analysisId)
+    setPreview(result.preview)
+    localStorage.setItem('cge_last_analysis', result.analysisId)
+    setScreen('preview')
   }
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.text, fontFamily: 'system-ui,-apple-system,sans-serif', WebkitFontSmoothing: 'antialiased' }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}input[type=number]{-moz-appearance:textfield}`}</style>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}input[type=number]{-moz-appearance:textfield}`}</style>
 
+      {/* Header */}
       {screen !== 'landing' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 10, background: C.bg + 'ee', backdropFilter: 'blur(12px)', borderBottom: `1px solid ${C.border}`, padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -98,19 +121,15 @@ export default function App() {
         </div>
       )}
 
-      {screen === 'landing'      && <Landing onStart={() => user ? setScreen('upload') : setScreen('login')} />}
-      {screen === 'login'        && <Login />}
-      {screen === 'upload'       && <Upload analysisId={analysisId} token={token} onNext={bills => { setUploadedBills(bills); setScreen('meter') }} />}
-      {screen === 'meter'        && <Meter onNext={handleMeterDone} />}
-      {screen === 'processing'   && <Processing analysisId={analysisId} bills={uploadedBills} token={token} onDone={handleProcessingDone} onError={msg => { setError(msg); setScreen('error') }} />}
-      {screen === 'preview'      && preview && <Preview preview={preview} analysisId={analysisId} token={token} onBack={() => setScreen('upload')} />}
-      {screen === 'loading_report' && (
-        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ textAlign: 'center' }}><div style={{ fontSize: 36, marginBottom: 16 }}>⚡</div><div style={{ color: C.muted, fontSize: 14 }}>Cargando reporte...</div></div>
-        </div>
-      )}
-      {screen === 'report'       && report && preview && <Report report={report} preview={preview} analysisId={analysisId} onHome={reset} />}
-      {screen === 'error'        && <ErrorScreen message={error} onRetry={reset} />}
+      {screen === 'landing'        && <Landing    onStart={() => user ? setScreen('upload') : setScreen('login')} />}
+      {screen === 'login'          && <Login />}
+      {screen === 'upload'         && <Upload     onNext={handleUploadNext} />}
+      {screen === 'meter'          && <Meter      onNext={handleMeterNext} />}
+      {screen === 'processing'     && <Processing files={files} meterReading={meterReading} token={token} onDone={handleProcessingDone} onError={msg => { setError(msg); setScreen('error') }} />}
+      {screen === 'preview'        && preview && <Preview preview={preview} analysisId={analysisId} token={token} onBack={() => setScreen('upload')} />}
+      {screen === 'loading_report' && <Loader text="Cargando reporte..." />}
+      {screen === 'report'         && report && preview && <Report report={report} preview={preview} analysisId={analysisId} onHome={reset} />}
+      {screen === 'error'          && <ErrorScreen message={error} onRetry={reset} />}
     </div>
   )
 }
