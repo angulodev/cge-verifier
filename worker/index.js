@@ -30,7 +30,7 @@ app.post('/api/analyses', async c => {
 
   // 1. Crear análisis
   const { data: analysis, error: aErr } = await supabase
-    .schema('cge').from('analyses')
+    .from('cge_analyses')
     .insert({ meter_reading, status: 'processing' })
     .select().single()
 
@@ -40,7 +40,7 @@ app.post('/api/analyses', async c => {
 
   // 2. Guardar boletas en Supabase
   for (const b of parsedBills.filter(b => b.success)) {
-    const { data: bill } = await supabase.schema('cge').from('bills').insert({
+    const { data: bill } = await supabase.from('cge_bills').insert({
       analysis_id:          analysis.id,
       bill_number:          b.billNumber,
       client_number:        b.clientNumber,
@@ -129,9 +129,9 @@ app.post('/api/analyses', async c => {
     })
   }
 
-  if (findings.length) await supabase.schema('cge').from('findings').insert(findings)
+  if (findings.length) await supabase.from('cge_findings').insert(findings)
 
-  await supabase.schema('cge').from('analyses').update({
+  await supabase.from('cge_analyses').update({
     status: 'preview', total_kwh_billed: totalKwh,
     difference_kwh: Math.round(diffKwh), difference_clp: diffCLP,
     avg_price_per_kwh: Math.round(avgPrice), bills_count: sorted.length,
@@ -155,9 +155,9 @@ app.post('/api/analyses', async c => {
 // ── GET /api/analyses/:id/preview ─────────────────────────────────────────
 app.get('/api/analyses/:id/preview', async c => {
   const supabase = c.get('supabase')
-  const { data } = await supabase.schema('cge').from('analyses').select('*').eq('id', c.req.param('id')).single()
+  const { data } = await supabase.from('cge_analyses').select('*').eq('id', c.req.param('id')).single()
   if (!data) return c.json({ error: 'No encontrado' }, 404)
-  const { data: findings } = await supabase.schema('cge').from('findings').select('*').eq('analysis_id', data.id).eq('is_preview', true)
+  const { data: findings } = await supabase.from('cge_findings').select('*').eq('analysis_id', data.id).eq('is_preview', true)
   return c.json({
     preview: {
       billsCount: data.bills_count, totalKwhBilled: data.total_kwh_billed,
@@ -173,12 +173,12 @@ app.get('/api/analyses/:id/preview', async c => {
 // ── GET /api/analyses/:id/detail ──────────────────────────────────────────
 app.get('/api/analyses/:id/detail', async c => {
   const supabase = c.get('supabase')
-  const { data: analysis } = await supabase.schema('cge').from('analyses').select('*').eq('id', c.req.param('id')).single()
+  const { data: analysis } = await supabase.from('cge_analyses').select('*').eq('id', c.req.param('id')).single()
   if (!analysis) return c.json({ error: 'No encontrado' }, 404)
   if (analysis.status !== 'paid') return c.json({ error: 'Pago requerido', code: 'PAYMENT_REQUIRED' }, 402)
   const [{ data: bills }, { data: findings }] = await Promise.all([
-    supabase.schema('cge').from('bills').select('*').eq('analysis_id', analysis.id).order('period_year').order('period_month'),
-    supabase.schema('cge').from('findings').select('*').eq('analysis_id', analysis.id),
+    supabase.from('cge_bills').select('*').eq('analysis_id', analysis.id).order('period_year').order('period_month'),
+    supabase.from('cge_findings').select('*').eq('analysis_id', analysis.id),
   ])
   const kwhs = bills?.map(b => b.kwh_consumed) ?? []
   const avg  = kwhs.length ? Math.round(kwhs.reduce((a,b)=>a+b,0)/kwhs.length) : 0
@@ -214,7 +214,7 @@ app.post('/api/analyses/:id/pay', async c => {
   })
   const mp = await mpRes.json()
   if (!mp.id) return c.json({ error: 'Error MP' }, 500)
-  await supabase.schema('cge').from('payments').insert({ analysis_id: id, provider_order_id: mp.id, amount: 2990 })
+  await supabase.from('cge_payments').insert({ analysis_id: id, provider_order_id: mp.id, amount: 2990 })
   return c.json({ preferenceId: mp.id, initPoint: mp.init_point })
 })
 
@@ -227,8 +227,8 @@ app.post('/api/webhooks/mp', async c => {
   if (pay.status !== 'approved') return c.json({ ok: true })
   const aid = pay.metadata?.analysis_id
   if (!aid) return c.json({ ok: true })
-  await supabase.schema('cge').from('payments').update({ status: 'approved', provider_payment_id: String(pay.id), paid_at: new Date().toISOString() }).eq('analysis_id', aid).eq('status', 'pending')
-  await supabase.schema('cge').from('analyses').update({ status: 'paid' }).eq('id', aid)
+  await supabase.from('cge_payments').update({ status: 'approved', provider_payment_id: String(pay.id), paid_at: new Date().toISOString() }).eq('analysis_id', aid).eq('status', 'pending')
+  await supabase.from('cge_analyses').update({ status: 'paid' }).eq('id', aid)
   return c.json({ ok: true })
 })
 
