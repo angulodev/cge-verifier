@@ -3,6 +3,11 @@ main = "worker/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Assets del frontend (build de Vite)
+[assets]
+directory = "./public"
+
+# R2 para PDFs de boletas
 [[r2_buckets]]
 binding = "CGE_BUCKET"
 bucket_name = "cge-bills"
@@ -10,7 +15,7 @@ bucket_name = "cge-bills"
 [vars]
 SITE_URL = "https://auditacge.cl"
 
-# Secrets (configurar con: wrangler secret put NOMBRE)
+# Secrets — configurar con: wrangler secret put NOMBRE
 # SUPABASE_URL
 # SUPABASE_ANON_KEY
 # MP_ACCESS_TOKEN

@@ -1,0 +1,46 @@
+name: Deploy CGE Verifier
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cge-verifier/**'
+      - '.github/workflows/deploy-cge.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Cloudflare Workers
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: cge-verifier/package.json
+
+      - name: Install dependencies
+        working-directory: cge-verifier
+        run: npm ci
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cge-verifier
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Set Worker Secrets
+        working-directory: cge-verifier
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          echo "${{ secrets.SUPABASE_URL }}"      | npx wrangler secret put SUPABASE_URL
+          echo "${{ secrets.SUPABASE_ANON_KEY }}" | npx wrangler secret put SUPABASE_ANON_KEY
+          echo "${{ secrets.MP_ACCESS_TOKEN }}"   | npx wrangler secret put MP_ACCESS_TOKEN
+          echo "${{ secrets.WORKER_URL }}"        | npx wrangler secret put WORKER_URL
