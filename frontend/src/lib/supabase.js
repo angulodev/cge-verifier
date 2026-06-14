@@ -13,9 +13,13 @@ export async function getToken() {
 
 // Login con Google
 export function loginWithGoogle() {
+  // window.location.origin solo da el dominio, necesitamos incluir el base path
+  const redirectTo = import.meta.env.VITE_SITE_URL
+    ?? `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`
+
   return supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: window.location.origin },
+    options: { redirectTo },
   })
 }
 
